@@ -7730,7 +7730,7 @@
             "description": "Specific stored client key to authenticate with; `None` uses the keys\nmarked default."
           },
           "password": {
-            "$ref": "#/components/schemas/MaybeSecretRef"
+            "type": "string"
           }
         }
       },
