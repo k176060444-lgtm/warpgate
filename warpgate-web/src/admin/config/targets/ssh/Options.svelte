@@ -122,6 +122,25 @@
     </div>
 </div>
 
+{#if jumpHostSelectValue}
+    <div class="mb-3">
+        <div class="form-check form-switch">
+            <input
+                class="form-check-input"
+                type="checkbox"
+                id="resolveLocally"
+                bind:checked={options.resolve_locally}
+            >
+            <label class="form-check-label" for="resolveLocally">
+                Resolve target address locally before jump
+            </label>
+        </div>
+        <div class="form-text text-muted">
+            Resolves the target domain on Warpgate and passes the IP address to the jump host. Improves metadata privacy, enables accurate IP audit logging, and ensures fresh dynamic DNS resolution.
+        </div>
+    </div>
+{/if}
+
 {#if $adminPermissions.targetsEdit}
     <div class="mb-3">
         {#if !hostKeyCheckInvalidated}

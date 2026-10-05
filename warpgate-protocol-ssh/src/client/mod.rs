@@ -781,14 +781,47 @@ impl Connector {
 
         for ssh_options in iter {
             let _ = self.tx.send(RCEvent::HopConnected).await;
+            let target_host = if ssh_options.resolve_locally {
+                let address_str = format!("{}:{}", ssh_options.host, ssh_options.port);
+                match address_str.to_socket_addrs() {
+                    Ok(mut addrs) => {
+                        if let Some(addr) = addrs.next() {
+                            let ip_str = addr.ip().to_string();
+                            info!(
+                                original_host = %ssh_options.host,
+                                resolved_ip = %ip_str,
+                                "Resolved jump target host locally"
+                            );
+                            ip_str
+                        } else {
+                            warn!(
+                                host = %ssh_options.host,
+                                "Local DNS resolution returned no addresses, falling back to original host"
+                            );
+                            ssh_options.host.clone()
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            ?e,
+                            host = %ssh_options.host,
+                            "Local DNS resolution failed, falling back to original host"
+                        );
+                        ssh_options.host.clone()
+                    }
+                }
+            } else {
+                ssh_options.host.clone()
+            };
+
             info!(
-                host = %ssh_options.host,
+                host = %target_host,
                 port = ssh_options.port,
                 "Opening direct-tcpip channel through jump host"
             );
             let channel = session
                 .channel_open_direct_tcpip(
-                    ssh_options.host.clone(),
+                    target_host,
                     u32::from(ssh_options.port),
                     "localhost".to_string(),
                     0,
