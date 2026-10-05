@@ -129,7 +129,7 @@
                 class="form-check-input"
                 type="checkbox"
                 id="resolveLocally"
-                bind:checked={options.resolve_locally}
+                bind:checked={options.resolveLocally}
             >
             <label class="form-check-label" for="resolveLocally">
                 Resolve target address locally before jump
