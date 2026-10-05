@@ -42,6 +42,8 @@ pub struct TargetSSHOptions {
     pub auth: SSHTargetAuth,
     #[serde(default)]
     pub jump_host: Option<Uuid>,
+    #[serde(default)]
+    pub resolve_locally: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]

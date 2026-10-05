@@ -8249,6 +8249,9 @@
           "jump_host": {
             "type": "string",
             "format": "uuid"
+          },
+          "resolve_locally": {
+            "type": "boolean"
           }
         }
       },
