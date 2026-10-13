@@ -43,6 +43,7 @@ pub struct TargetSSHOptions {
     #[serde(default)]
     pub jump_host: Option<Uuid>,
     #[serde(default)]
+    #[oai(default)]
     pub resolve_locally: bool,
 }
 

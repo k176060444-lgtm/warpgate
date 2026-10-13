@@ -34,6 +34,7 @@
                     port: 22,
                     username: 'root',
                     allowInsecureAlgos: false,
+                    resolveLocally: false,
                     auth: {
                         kind: 'PublicKey' as const,
                     },
