@@ -192,6 +192,7 @@ class ProcessManager:
         self.ctx = ctx
         self.timeout = timeout
         self._k3s_containers: List[str] = []
+        self.socks5_servers: List = []
 
     def _remove_k3s_containers(self):
         """Force-remove every k3s container we've started so far. Idempotent —
@@ -206,6 +207,9 @@ class ProcessManager:
 
     def stop(self):
         self._remove_k3s_containers()
+        for server in self.socks5_servers:
+            server.stop()
+        self.socks5_servers.clear()
         for child in self.children:
             try:
                 p = psutil.Process(child.process.pid)
@@ -333,6 +337,19 @@ class ProcessManager:
             ]
         )
         return port
+
+    def start_socks5_proxy(self):
+        """Start an in-process SOCKS5 proxy and return it.
+
+        Kept in-process (no container) because the proxy only has to accept a
+        CONNECT and relay bytes: the interesting assertion is which destination
+        Warpgate asked for, which a test can read off `proxy.requests`.
+        """
+        from .socks5_server import Socks5Server
+
+        server = Socks5Server(port=alloc_port()).start()
+        self.socks5_servers.append(server)
+        return server
 
     def start_mariadb_server(self):
         port = alloc_port()

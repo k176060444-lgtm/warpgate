@@ -4,6 +4,7 @@
     import {
         api,
         type SSHClientKey,
+        SshProxyKind,
         type Target,
         type TargetOptionsTargetSSHOptions,
     } from 'admin/lib/api'
@@ -57,6 +58,53 @@
         const jumpHost = options.jumpHost
         untrack(() => {
             jumpHostSelectValue = jumpHost ?? ''
+        })
+    })
+
+    // svelte-ignore state_referenced_locally
+    let proxyKind = $state(options.proxy?.kind ?? SshProxyKind.None)
+
+    $effect(() => {
+        const kind = proxyKind
+        untrack(() => {
+            if (kind === SshProxyKind.None) {
+                options.proxy = undefined
+                return
+            }
+            options.proxy ??= {
+                kind,
+                address: '',
+                username: '',
+                password: '',
+                skipPrivateNetworks: false,
+            }
+            options.proxy.kind = kind
+        })
+    })
+
+    $effect(() => {
+        const kind = options.proxy?.kind ?? SshProxyKind.None
+        untrack(() => {
+            proxyKind = kind
+        })
+    })
+
+    // svelte-ignore state_referenced_locally
+    let proxyAddress = $state(options.proxy?.address ?? '')
+
+    $effect(() => {
+        const val = proxyAddress
+        untrack(() => {
+            if (options.proxy) {
+                options.proxy.address = val
+            }
+        })
+    })
+
+    $effect(() => {
+        const address = options.proxy?.address ?? ''
+        untrack(() => {
+            proxyAddress = address
         })
     })
 
@@ -138,6 +186,79 @@
         <div class="form-text text-muted">
             Resolves the target domain on Warpgate and passes the IP address to the jump host. Improves metadata privacy, enables accurate IP audit logging, and ensures fresh dynamic DNS resolution.
         </div>
+    </div>
+{/if}
+
+<h4 class="mt-4">Egress proxy</h4>
+
+<div class="row">
+    <div class="col-12 col-md-4">
+        <FormGroup floating label="Proxy type">
+            <select class="form-control" bind:value={proxyKind}>
+                <option value={SshProxyKind.None}>None (direct connection)</option>
+                <option value={SshProxyKind.Socks5}>SOCKS5</option>
+                <option value={SshProxyKind.HttpConnect}>HTTP CONNECT</option>
+            </select>
+        </FormGroup>
+    </div>
+    {#if options.proxy}
+        <div class="col-12 col-md-8">
+            <FormGroup floating label="Proxy address (host:port)">
+                <input
+                    class="form-control"
+                    placeholder="127.0.0.1:1080"
+                    bind:value={proxyAddress}
+                >
+            </FormGroup>
+        </div>
+    {/if}
+</div>
+
+{#if options.proxy}
+    <div class="row">
+        <div class="col-12 col-md-6">
+            <SecretRefInput
+                bind:value={options.proxy.username}
+                inlineLabel="Proxy username"
+                disabled={!$adminPermissions.targetsEdit}
+                intendedUsage={{
+                    kind: 'Target',
+                    id,
+                    name
+                }}
+            />
+        </div>
+        <div class="col-12 col-md-6">
+            <SecretRefInput
+                bind:value={options.proxy.password}
+                inlineLabel="Proxy password"
+                disabled={!$adminPermissions.targetsEdit}
+                intendedUsage={{
+                    kind: 'Target',
+                    id,
+                    name
+                }}
+            />
+        </div>
+    </div>
+    <div class="mb-3">
+        <div class="form-check form-switch">
+            <input
+                class="form-check-input"
+                type="checkbox"
+                id="proxySkipPrivateNetworks"
+                bind:checked={options.proxy.skipPrivateNetworks}
+            >
+            <label class="form-check-label" for="proxySkipPrivateNetworks">
+                Bypass the proxy for private network targets
+            </label>
+        </div>
+        <div class="form-text text-muted">
+            Connects directly when the target host is loopback, private or link-local. Leave off if the target is only reachable from the proxy's network position.
+        </div>
+    </div>
+    <div class="form-text text-muted mb-3">
+        Only the first hop of a jump chain uses the proxy. Further hops are tunnelled through the established SSH session. The proxy resolves the target hostname.
     </div>
 {/if}
 

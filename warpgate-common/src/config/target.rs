@@ -45,6 +45,47 @@ pub struct TargetSSHOptions {
     #[serde(default)]
     #[oai(default)]
     pub resolve_locally: bool,
+    /// Route the TCP connection to the first hop through an egress proxy.
+    #[serde(default)]
+    #[oai(default)]
+    pub proxy: Option<SshProxyOptions>,
+}
+
+/// How to reach the first SSH hop when it is not directly dialable.
+///
+/// Only the first hop of a chain uses the proxy: further hops are tunnelled
+/// through `direct-tcpip` over the already-established SSH session, so their
+/// traffic is already carried by the proxied connection.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct SshProxyOptions {
+    #[serde(default)]
+    pub kind: SshProxyKind,
+    /// `host` or `host:port`; the port defaults to the scheme's default.
+    #[serde(default)]
+    pub address: String,
+    #[serde(default)]
+    pub username: MaybeSecretRef,
+    #[serde(default)]
+    pub password: MaybeSecretRef,
+    /// Do not route connections to private, loopback or link-local addresses
+    /// through the proxy.
+    #[serde(default)]
+    pub skip_private_networks: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default, Enum)]
+#[serde(rename_all = "snake_case")]
+pub enum SshProxyKind {
+    /// Plain TCP; no proxy is used and `address` is ignored.
+    #[default]
+    #[oai(rename = "none")]
+    None,
+    /// SOCKS5, with the destination hostname resolved by the proxy.
+    #[oai(rename = "socks5")]
+    Socks5,
+    /// `HTTP CONNECT`.
+    #[oai(rename = "http_connect")]
+    HttpConnect,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
@@ -455,11 +496,16 @@ pub trait TargetSecrets {
 
 impl TargetSecrets for TargetSSHOptions {
     fn secrets(&self) -> Vec<&MaybeSecretRef> {
-        match &self.auth {
+        let mut secrets = match &self.auth {
             SSHTargetAuth::Password(auth) => vec![&auth.password],
             SSHTargetAuth::PublicKeyAndPassword(auth) => vec![&auth.password],
             SSHTargetAuth::PublicKey(_) | SSHTargetAuth::IamRole(_) => vec![],
+        };
+        if let Some(proxy) = &self.proxy {
+            secrets.push(&proxy.username);
+            secrets.push(&proxy.password);
         }
+        secrets
     }
 }
 

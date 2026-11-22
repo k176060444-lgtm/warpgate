@@ -2,6 +2,7 @@ mod channel_direct_tcpip;
 mod channel_session;
 mod error;
 mod handler;
+pub mod proxy;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::net::ToSocketAddrs;
@@ -29,7 +30,8 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
 use warpgate_common::{
-    SSHTargetAuth, TargetOptionsVariant, TargetSSHOptions, UserSessionId, WarpgateError,
+    MaybeSecretRef, SSHTargetAuth, SecretResolver, TargetOptionsVariant, TargetSSHOptions,
+    UserSessionId, WarpgateError,
 };
 use warpgate_core::{AdmittedTarget, ConfigProvider, Services};
 
@@ -75,6 +77,9 @@ pub enum ConnectionError {
     #[error("Jump host target not found")]
     JumpHostTargetNotFound,
 
+    #[error("Proxy error: {0}")]
+    Proxy(String),
+
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
 }
@@ -82,6 +87,17 @@ pub enum ConnectionError {
 pub struct ResolvedSshChainHost {
     pub name: String,
     pub ssh_options: TargetSSHOptions,
+}
+
+/// Resolve an optional credential slot, treating an empty value as "not
+/// configured" so that a blank proxy username does not become `""`.
+async fn resolve_optional_secret(
+    value: &MaybeSecretRef,
+    backend: &dyn SecretResolver,
+) -> Result<Option<String>, ConnectionError> {
+    let resolved = value.resolve(backend).await?;
+    let resolved = resolved.expose_secret().to_owned();
+    Ok((!resolved.is_empty()).then_some(resolved))
 }
 
 /// A jump host that names a deleted or non-SSH target: a broken configuration
@@ -664,6 +680,35 @@ impl RemoteClient {
 }
 
 impl Connector {
+    /// Resolve the proxy configured on a target into a ready-to-use descriptor.
+    ///
+    /// Credentials go through the same secret resolution as target passwords, so
+    /// a proxy password can live in a Vault backend instead of the database.
+    async fn resolve_proxy(
+        &self,
+        ssh_options: &TargetSSHOptions,
+    ) -> Result<Option<proxy::ResolvedProxy>, ConnectionError> {
+        let Some(proxy_options) = &ssh_options.proxy else {
+            return Ok(None);
+        };
+        if proxy_options.kind == warpgate_common::SshProxyKind::None {
+            return Ok(None);
+        }
+
+        let username = resolve_optional_secret(
+            &proxy_options.username,
+            &*self.services.secret_backends,
+        )
+        .await?;
+        let password = resolve_optional_secret(
+            &proxy_options.password,
+            &*self.services.secret_backends,
+        )
+        .await?;
+
+        proxy::ResolvedProxy::parse(proxy_options, username, password)
+    }
+
     async fn build_ssh_config(&self, ssh_options: &TargetSSHOptions) -> Arc<russh::client::Config> {
         let algos = if ssh_options.allow_insecure_algos {
             Preferred {
@@ -749,8 +794,9 @@ impl Connector {
     }
 
     /// Connect through a pre-resolved chain of SSH hops, each tunnelled through the previous.
-    /// `chain` must be non-empty; the first entry is connected directly, subsequent ones via
-    /// `channel_open_direct_tcpip` through the previous session.
+    /// `chain` must be non-empty; the first entry is connected directly (or through the
+    /// proxy configured on it), subsequent ones via `channel_open_direct_tcpip` through the
+    /// previous session.
     async fn connect_chain(
         &self,
         chain: Vec<TargetSSHOptions>,
@@ -759,13 +805,13 @@ impl Connector {
         let first = iter.next().ok_or(ConnectionError::Resolve)?;
 
         let config = self.build_ssh_config(&first).await;
-        let address_str = format!("{}:{}", first.host, first.port);
-        let address = address_str
-            .to_socket_addrs()
-            .map_err(ConnectionError::Io)
-            .and_then(|mut x| x.next().ok_or(ConnectionError::Resolve))
-            .inspect_err(|e| error!(?e, address=%address_str, "Cannot resolve address"))?;
-        info!(?address, username = %first.username, "Connecting");
+        let proxy = self.resolve_proxy(&first).await?;
+        info!(
+            host = %first.host,
+            port = first.port,
+            proxy = ?proxy.as_ref().map(|p| format!("{:?} {}:{}", p.kind, p.host, p.port)),
+            "Connecting"
+        );
         let (event_tx, event_rx) = unbounded_channel();
         let handler = ClientHandler {
             ssh_options: first.clone(),
@@ -773,7 +819,12 @@ impl Connector {
             services: self.services.clone(),
             session_id: self.id,
         };
-        let fut = russh::client::connect(config, address, handler);
+        let fut = async {
+            let stream = proxy::connect_first_hop(proxy.as_ref(), &first.host, first.port)
+                .await
+                .map_err(ClientHandlerError::ConnectionError)?;
+            russh::client::connect_stream(config, stream, handler).await
+        };
         let (mut session, mut active_rx) = self
             .wait_for_connection(&first, fut, event_rx, false)
             .boxed()

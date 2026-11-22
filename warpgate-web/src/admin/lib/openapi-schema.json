@@ -7690,6 +7690,36 @@
           "Ignore"
         ]
       },
+      "SshProxyKind": {
+        "type": "string",
+        "enum": [
+          "none",
+          "socks5",
+          "http_connect"
+        ]
+      },
+      "SshProxyOptions": {
+        "type": "object",
+        "title": "SshProxyOptions",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/SshProxyKind"
+          },
+          "address": {
+            "type": "string",
+            "description": "`host` or `host:port`; the port defaults to the scheme's default."
+          },
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "skip_private_networks": {
+            "type": "boolean"
+          }
+        }
+      },
       "SshTargetIamRoleAuth": {
         "type": "object",
         "title": "SshTargetIamRoleAuth"
@@ -8295,6 +8325,9 @@
           },
           "resolve_locally": {
             "type": "boolean"
+          },
+          "proxy": {
+            "$ref": "#/components/schemas/SshProxyOptions"
           }
         }
       },
