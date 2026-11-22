@@ -39,7 +39,7 @@ impl ResolvedProxy {
         password: Option<String>,
     ) -> Result<Option<Self>, ConnectionError> {
         let default_port = match options.kind {
-            SshProxyKind::None => return Ok(None),
+            SshProxyKind::Direct => return Ok(None),
             SshProxyKind::Socks5 => 1080,
             SshProxyKind::HttpConnect => 3128,
         };
@@ -93,21 +93,25 @@ impl ResolvedProxy {
 fn is_private(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
+            let [first, second, ..] = v4.octets();
+            // 100.64.0.0/10, carrier-grade NAT (also Tailscale's range)
+            let cgnat = first == 100 && (64..128).contains(&second);
             v4.is_loopback()
                 || v4.is_private()
                 || v4.is_link_local()
                 || v4.is_unspecified()
                 || v4.is_broadcast()
-                // 100.64.0.0/10, carrier-grade NAT (also Tailscale's range)
-                || (v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1]))
+                || cgnat
         }
         IpAddr::V6(v6) => {
+            let segments = v6.segments();
+            let first = segments.first().copied().unwrap_or(0);
             v6.is_loopback()
                 || v6.is_unspecified()
                 // Unique local addresses, fc00::/7
-                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                || (first & 0xfe00) == 0xfc00
                 // Link-local, fe80::/10
-                || (v6.segments()[0] & 0xffc0) == 0xfe80
+                || (first & 0xffc0) == 0xfe80
                 || v6.to_ipv4_mapped().is_some_and(|v4| is_private(IpAddr::V4(v4)))
         }
     }
@@ -173,7 +177,11 @@ pub async fn connect_first_hop(
     stream.set_nodelay(true).ok();
 
     match proxy.kind {
-        SshProxyKind::None => unreachable!("filtered above"),
+        SshProxyKind::Direct => {
+            return Err(ConnectionError::Proxy(
+                "Proxy kind is `none` but a proxy was passed in".to_string(),
+            ));
+        }
         SshProxyKind::Socks5 => socks5_handshake(&mut stream, proxy, host, port).await?,
         SshProxyKind::HttpConnect => http_connect_handshake(&mut stream, proxy, host, port).await?,
     }
@@ -221,13 +229,13 @@ async fn socks5_handshake_inner(
 
     let mut reply = [0u8; 2];
     stream.read_exact(&mut reply).await.map_err(io_proxy)?;
-    if reply[0] != 0x05 {
+    let [version, method] = reply;
+    if version != 0x05 {
         return Err(ConnectionError::Proxy(format!(
-            "Proxy did not answer with SOCKS5 (got version {})",
-            reply[0]
+            "Proxy did not answer with SOCKS5 (got version {version})"
         )));
     }
-    match reply[1] {
+    match method {
         0x00 => {}
         0x02 => {
             if !want_auth {
@@ -250,7 +258,8 @@ async fn socks5_handshake_inner(
             stream.write_all(&auth).await.map_err(io_proxy)?;
             let mut auth_reply = [0u8; 2];
             stream.read_exact(&mut auth_reply).await.map_err(io_proxy)?;
-            if auth_reply[1] != 0x00 {
+            let [_, status] = auth_reply;
+            if status != 0x00 {
                 return Err(ConnectionError::Proxy(
                     "SOCKS5 proxy rejected the configured credentials".to_string(),
                 ));
@@ -281,19 +290,20 @@ async fn socks5_handshake_inner(
 
     let mut head = [0u8; 4];
     stream.read_exact(&mut head).await.map_err(io_proxy)?;
-    if head[0] != 0x05 {
+    let [version, status, _, atyp] = head;
+    if version != 0x05 {
         return Err(ConnectionError::Proxy(
             "SOCKS5 proxy sent a malformed reply".to_string(),
         ));
     }
-    if head[1] != 0x00 {
+    if status != 0x00 {
         return Err(ConnectionError::Proxy(format!(
             "SOCKS5 proxy refused to connect to {host}:{port}: {}",
-            socks5_error(head[1])
+            socks5_error(status)
         )));
     }
     // Drain the bound address so the stream is positioned at the tunnel payload.
-    match head[3] {
+    match atyp {
         0x01 => {
             let mut skip = [0u8; 4 + 2];
             stream.read_exact(&mut skip).await.map_err(io_proxy)?;
@@ -305,12 +315,13 @@ async fn socks5_handshake_inner(
         0x03 => {
             let mut len = [0u8; 1];
             stream.read_exact(&mut len).await.map_err(io_proxy)?;
-            let mut skip = vec![0u8; len[0] as usize + 2];
+            let [domain_len] = len;
+            let mut skip = vec![0u8; usize::from(domain_len) + 2];
             stream.read_exact(&mut skip).await.map_err(io_proxy)?;
         }
-        atyp => {
+        other => {
             return Err(ConnectionError::Proxy(format!(
-                "SOCKS5 proxy replied with unknown address type {atyp:#04x}"
+                "SOCKS5 proxy replied with unknown address type {other:#04x}"
             )));
         }
     }
@@ -378,7 +389,8 @@ async fn http_connect_handshake_inner(
             ));
         }
         stream.read_exact(&mut byte).await.map_err(io_proxy)?;
-        head.push(byte[0]);
+        let [byte] = byte;
+        head.push(byte);
     }
 
     let status_line = String::from_utf8_lossy(&head)

@@ -62,12 +62,12 @@
     })
 
     // svelte-ignore state_referenced_locally
-    let proxyKind = $state(options.proxy?.kind ?? SshProxyKind.None)
+    let proxyKind = $state(options.proxy?.kind ?? SshProxyKind.Direct)
 
     $effect(() => {
         const kind = proxyKind
         untrack(() => {
-            if (kind === SshProxyKind.None) {
+            if (kind === SshProxyKind.Direct) {
                 options.proxy = undefined
                 return
             }
@@ -83,7 +83,7 @@
     })
 
     $effect(() => {
-        const kind = options.proxy?.kind ?? SshProxyKind.None
+        const kind = options.proxy?.kind ?? SshProxyKind.Direct
         untrack(() => {
             proxyKind = kind
         })
@@ -195,7 +195,7 @@
     <div class="col-12 col-md-4">
         <FormGroup floating label="Proxy type">
             <select class="form-control" bind:value={proxyKind}>
-                <option value={SshProxyKind.None}>None (direct connection)</option>
+                <option value={SshProxyKind.Direct}>Direct connection</option>
                 <option value={SshProxyKind.Socks5}>SOCKS5</option>
                 <option value={SshProxyKind.HttpConnect}>HTTP CONNECT</option>
             </select>

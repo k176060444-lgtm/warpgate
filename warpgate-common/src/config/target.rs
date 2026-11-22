@@ -78,8 +78,8 @@ pub struct SshProxyOptions {
 pub enum SshProxyKind {
     /// Plain TCP; no proxy is used and `address` is ignored.
     #[default]
-    #[oai(rename = "none")]
-    None,
+    #[oai(rename = "direct")]
+    Direct,
     /// SOCKS5, with the destination hostname resolved by the proxy.
     #[oai(rename = "socks5")]
     Socks5,

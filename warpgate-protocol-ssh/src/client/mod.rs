@@ -30,8 +30,8 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
 use warpgate_common::{
-    MaybeSecretRef, SSHTargetAuth, SecretResolver, TargetOptionsVariant, TargetSSHOptions,
-    UserSessionId, WarpgateError,
+    MaybeSecretRef, SSHTargetAuth, SecretResolver, SshProxyKind, TargetOptionsVariant,
+    TargetSSHOptions, UserSessionId, WarpgateError,
 };
 use warpgate_core::{AdmittedTarget, ConfigProvider, Services};
 
@@ -691,7 +691,7 @@ impl Connector {
         let Some(proxy_options) = &ssh_options.proxy else {
             return Ok(None);
         };
-        if proxy_options.kind == warpgate_common::SshProxyKind::None {
+        if proxy_options.kind == SshProxyKind::Direct {
             return Ok(None);
         }
 

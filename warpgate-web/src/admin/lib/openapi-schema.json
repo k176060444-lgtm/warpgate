@@ -7693,7 +7693,7 @@
       "SshProxyKind": {
         "type": "string",
         "enum": [
-          "none",
+          "direct",
           "socks5",
           "http_connect"
         ]
